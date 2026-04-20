@@ -1,0 +1,15 @@
+# Built artifacts from scripts/eval.sh (renders, HTML comparisons)
+/out/
+
+# Local working dirs created by IDE/agent tooling
+/.claude/
+/.codanna/
+/context/
+
+# Go build output
+*.test
+*.out
+
+# Editor caches
+.vscode/
+.idea/

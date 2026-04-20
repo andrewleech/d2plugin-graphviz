@@ -1,0 +1,186 @@
+digraph HeraWorkflow {
+    rankdir=TB;
+    size="7.3,10.2";
+    ratio=compress;
+    compound=true;
+    nodesep=0.25;
+    ranksep=0.3;
+    splines=true;
+    newrank=true;
+
+    node [shape=box, style="rounded,filled", fontsize=9, fontname="Helvetica",
+          fillcolor="#f0f4f8", color="#4a6785", width=1.2, height=0.28, margin="0.05,0.03"];
+    edge [fontsize=7, fontname="Helvetica", color="#666666", arrowsize=0.5];
+
+    // ===== TITLE =====
+    title [label="Hera Reader Workflow State Machine", shape=none, fontsize=12,
+           fontname="Helvetica Bold", fillcolor=transparent, width=0, height=0];
+
+    // ===== NORMAL USE CLUSTER =====
+    subgraph cluster_normal {
+        label="Normal Use";
+        labeljust=l; fontsize=10; fontname="Helvetica Bold";
+        style="rounded,filled"; color="#90caf9"; bgcolor="#e3f2fd"; penwidth=1.5;
+
+        init [label="", shape=point, width=0.1, height=0.1, fillcolor="#333333"];
+        power_on [label="POWER-ON", fillcolor="#bbdefb"];
+        self_test [label="SELF-TEST", fillcolor="#bbdefb"];
+        ready [label="READY", fillcolor="#c8e6c9", penwidth=2];
+        reading [label="READING CASSETTE", fillcolor="#fff9c4"];
+        heating [label="HEATING CASSETTE", fillcolor="#ffe0b2"];
+        test_auth [label="TEST AUTH", fillcolor="#e1bee7"];
+        detecting [label="DETECTING FLUID", fillcolor="#fff9c4"];
+        running [label="TEST RUNNING", fillcolor="#ffccbc", penwidth=2];
+        validate [label="TEST VALIDATION", fillcolor="#fff9c4"];
+        complete [label="TEST COMPLETE", fillcolor="#c8e6c9", penwidth=2];
+        selfcheck_pass [label="SELF CHECK PASS", fillcolor="#c8e6c9"];
+        selfcheck_fail [label="SELF CHECK FAIL", fillcolor="#ffcdd2"];
+
+        {rank=same; heating; test_auth}
+        {rank=same; complete; selfcheck_pass; selfcheck_fail}
+    }
+
+    // ===== CLEANING CLUSTER =====
+    subgraph cluster_cleaning {
+        label="Cleaning";
+        labeljust=l; fontsize=9; fontname="Helvetica Bold";
+        style="rounded,filled"; color="#66bb6a"; bgcolor="#e8f5e9"; penwidth=1.5;
+
+        clean_mode [label="CLEAN MODE", fillcolor="#a5d6a7"];
+        dev_cleaning [label="DEVICE\nCLEANING", fillcolor="#a5d6a7"];
+    }
+
+    // ===== FIRMWARE UPDATE CLUSTER =====
+    subgraph cluster_ota {
+        label="Firmware Update";
+        labeljust=l; fontsize=9; fontname="Helvetica Bold";
+        style="rounded,filled"; color="#ffa726"; bgcolor="#fff3e0"; penwidth=1.5;
+
+        ble_ota [label="BLE OTA", fillcolor="#ffe0b2"];
+        ota_success [label="OTA SUCCESS", fillcolor="#c8e6c9"];
+        ota_error [label="OTA ERROR", fillcolor="#ffcdd2"];
+    }
+
+    // ===== USB / SYSTEM CLUSTER =====
+    subgraph cluster_usb {
+        label="USB / System";
+        labeljust=l; fontsize=9; fontname="Helvetica Bold";
+        style="rounded,filled"; color="#90a4ae"; bgcolor="#eceff1"; penwidth=1.5;
+
+        usb_comms [label="USB COMMS", fillcolor="#cfd8dc"];
+        reboot [label="REBOOT", fillcolor="#cfd8dc"];
+    }
+
+    // ===== SHIPPING BATTERY CLUSTER =====
+    subgraph cluster_shipping {
+        label="Shipping Battery";
+        labeljust=l; fontsize=9; fontname="Helvetica Bold";
+        style="rounded,filled"; color="#ab47bc"; bgcolor="#f3e5f5"; penwidth=1.5;
+
+        ship_charge [label="CHARGE", fillcolor="#ce93d8"];
+        ship_discharge [label="DISCHARGE", fillcolor="#ce93d8"];
+        ship_reached [label="LEVEL OK", fillcolor="#c8e6c9"];
+        shutdown [label="SHUTTING DOWN", fillcolor="#cfd8dc"];
+
+        {rank=same; ship_charge; ship_discharge}
+    }
+
+    // ===== ERROR CLUSTER =====
+    subgraph cluster_errors {
+        label="Error States (19 total)";
+        labeljust=l; fontsize=9; fontname="Helvetica Bold";
+        style="rounded,filled"; color="#ef5350"; bgcolor="#ffebee"; penwidth=2;
+
+        error_box [label=<
+<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="1">
+<TR><TD ALIGN="LEFT"><FONT POINT-SIZE="7.5"><B>Cassette:</B> Used, Invalid, Expired, Contaminated, Removed, Removed Auth, Removed Heating</FONT></TD></TR>
+<TR><TD ALIGN="LEFT"><FONT POINT-SIZE="7.5"><B>System:</B> Memory, Hardware, System Error, Time, Heater Over-Temp</FONT></TD></TR>
+<TR><TD ALIGN="LEFT"><FONT POINT-SIZE="7.5"><B>Environment:</B> Environment Check, Power</FONT></TD></TR>
+<TR><TD ALIGN="LEFT"><FONT POINT-SIZE="7.5"><B>Test:</B> Test Error, Not Authorised, Fluid Detection, Fluid Already Present</FONT></TD></TR>
+<TR><TD ALIGN="LEFT"><FONT POINT-SIZE="7.5"><I>Recovery: most &rarr; SELF-TEST via Remove Cassette or Mains Power</I></FONT></TD></TR>
+</TABLE>
+        >, shape=box, style="rounded,filled", fillcolor="#ffcdd2", color="#d32f2f", fontsize=8];
+    }
+
+    // ===== GLOBAL NOTE =====
+    globals_note [label=<
+<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="1">
+<TR><TD><B><FONT POINT-SIZE="8">Global transitions (from any state):</FONT></B></TD></TR>
+<TR><TD ALIGN="LEFT"><FONT POINT-SIZE="7">&bull; system error &rarr; SYSTEM ERROR</FONT></TD></TR>
+<TR><TD ALIGN="LEFT"><FONT POINT-SIZE="7">&bull; heater over-temp &rarr; HEATER OVER TEMP ERROR</FONT></TD></TR>
+<TR><TD ALIGN="LEFT"><FONT POINT-SIZE="7">&bull; BLE OTA start/fail &rarr; BLE OTA / OTA ERROR</FONT></TD></TR>
+<TR><TD ALIGN="LEFT"><FONT POINT-SIZE="7">&bull; hardware fault &rarr; HARDWARE ERROR</FONT></TD></TR>
+<TR><TD ALIGN="LEFT"><FONT POINT-SIZE="7">&bull; USB connected &rarr; USB COMMS (except shipping/USB)</FONT></TD></TR>
+</TABLE>
+    >, shape=note, fillcolor="#fff8e1", color="#b0a050", fontsize=7, margin="0.08,0.04"];
+
+    // ===== HAPPY PATH (bold blue) =====
+    init -> power_on [style=bold, color="#1565c0", penwidth=1.5];
+    power_on -> self_test [label="power on", style=bold, color="#1565c0", penwidth=1.5];
+    self_test -> ready [label="self-test pass", style=bold, color="#1565c0", penwidth=1.5];
+    ready -> reading [label="insert cassette", style=bold, color="#1565c0", penwidth=1.5];
+
+    reading -> heating [label="heater fitted", style=bold, color="#1565c0", penwidth=1.5];
+    reading -> test_auth [label="no heater,\nauth req'd", style=dashed, color="#7b1fa2"];
+    reading -> detecting [label="no heater,\nno auth", style=dashed, color="#388e3c"];
+
+    heating -> test_auth [label="auth req'd", style=dashed, color="#7b1fa2"];
+    heating -> detecting [label="no auth", style=bold, color="#1565c0", penwidth=1.5];
+    test_auth -> detecting [label="authorised", style=bold, color="#1565c0", penwidth=1.5];
+
+    detecting -> running [label="fluid detected", style=bold, color="#1565c0", penwidth=1.5];
+    running -> validate [label="test time complete", style=bold, color="#1565c0", penwidth=1.5];
+    validate -> complete [label="result valid", style=bold, color="#1565c0", penwidth=1.5];
+
+    validate -> selfcheck_pass [label="self-check pass", color="#388e3c"];
+    validate -> selfcheck_fail [label="self-check fail", color="#d32f2f"];
+
+    // Return to self-test
+    complete -> self_test [label="remove cassette", color="#555", style=dotted, constraint=false];
+    selfcheck_pass -> self_test [label="remove", color="#555", style=dotted, constraint=false];
+    selfcheck_fail -> self_test [label="remove", color="#555", style=dotted, constraint=false];
+
+    // ===== CLEANING EDGES =====
+    ready -> clean_mode [label="clean cmd", color="#2e7d32"];
+    clean_mode -> dev_cleaning [label="start", color="#2e7d32"];
+    dev_cleaning -> self_test [label="done", color="#2e7d32", constraint=false];
+    clean_mode -> self_test [label="cancel", color="#999", style=dotted, constraint=false];
+
+    // ===== OTA EDGES =====
+    ble_ota -> ota_success [label="success", color="#00897b"];
+    ble_ota -> ota_error [label="fail", color="#d32f2f"];
+    ota_success -> self_test [label="reboot", color="#00897b", constraint=false];
+
+    // ===== SHIPPING EDGES =====
+    ready -> ship_charge [label="charge", color="#7b1fa2"];
+    ready -> ship_discharge [label="discharge", color="#7b1fa2"];
+    usb_comms -> ship_charge [label="charge", color="#888"];
+    usb_comms -> ship_discharge [label="discharge", color="#888"];
+    ship_charge -> ship_reached [label="at level", color="#888"];
+    ship_discharge -> ship_reached [label="at level", color="#888"];
+    ship_charge -> ship_discharge [label="switch", color="#888", constraint=false];
+    ship_discharge -> ship_charge [label="switch", color="#888", constraint=false];
+    ship_reached -> shutdown [label="mains disconn.", color="#888"];
+
+    // ===== USB EDGES =====
+    usb_comms -> reboot [label="mains disconn.", color="#888"];
+
+    // ===== ERROR EDGES =====
+    // Single arrow represents errors from any assay state (see error box for sources)
+    self_test -> error_box [label="errors (from any\nassay state)",
+                            color="#d32f2f", style=dashed, lhead=cluster_errors];
+
+    error_box -> self_test [label="recovery", color="#d32f2f",
+                            style=dashed, constraint=false, ltail=cluster_errors];
+
+    // ===== LAYOUT GUIDANCE =====
+    title -> init [style=invis];
+
+    // Force bottom-row arrangement
+    {rank=same; usb_comms; ship_charge; ship_discharge}
+    {rank=same; error_box; globals_note}
+
+    complete -> usb_comms [style=invis];
+    selfcheck_fail -> ship_charge [style=invis];
+    reboot -> globals_note [style=invis];
+}

@@ -1,0 +1,236 @@
+# Tuned variant of examples/input.d2 — same graph, augmented with
+# Graphviz-specific hints via vars.d2-config.data.graphviz.
+#
+# Hints applied (mapping pain list → Graphviz attrs):
+#   - rank_groups: put heating/auth on one row, the three terminal
+#     states on another row, and usb_comms alongside the shipping row
+#   - constraint=false on recovery/back-edges so they stop pushing
+#     self_test upstream of ready (pain point 3)
+#   - weight/penwidth on the happy-path edges so dot keeps them
+#     visually straight (pain point 6)
+#   - ranksep/nodesep tightened slightly for an A4 fit
+
+vars: {
+  d2-config: {
+    data: {
+      graphviz: |
+        {
+          "global_attrs": {
+            "rankdir": "TB",
+            "nodesep": "0.25",
+            "ranksep": "0.35",
+            "splines": "spline",
+            "newrank": "true",
+            "compound": "true",
+            "size": "7.3,10.2",
+            "ratio": "compress"
+          },
+          "rank_groups": [
+            ["main.use.reading_cassette", "main.right_col.svc.clean_mode"],
+            ["main.use.heating_cassette", "main.use.test_auth"],
+            ["main.use.test_complete", "main.use.self_check_pass", "main.use.self_check_fail"],
+            ["main.right_col.ship.shipping_battery_level_charge_mode", "main.right_col.ship.shipping_battery_level_discharge_mode"],
+            ["main.right_col.svc.usb_comms_mode", "main.use.self_check_pass"]
+          ],
+          "edge_attrs": {
+            "main.use.test_complete -> main.use.self_test":                 {"constraint": "false"},
+            "main.use.test_complete -> main.use.reading_cassette":          {"constraint": "false"},
+            "main.use.self_check_pass -> main.use.self_test":               {"constraint": "false"},
+            "main.use.self_check_pass -> main.use.reading_cassette":        {"constraint": "false"},
+            "main.use.self_check_fail -> main.use.self_test":               {"constraint": "false"},
+            "main.use.self_check_fail -> main.use.reading_cassette":        {"constraint": "false"},
+
+            "main.use.ready -> main.use.self_test":                         {"constraint": "false"},
+
+            "main.right_col.svc.device_cleaning -> main.use.self_test":     {"constraint": "false"},
+            "main.right_col.svc.clean_mode -> main.use.self_test":          {"constraint": "false"},
+            "main.right_col.svc.ota_success -> main.use.ready":             {"constraint": "false"},
+
+            "main.right_col.ship.shipping_battery_level_discharge_mode -> main.right_col.ship.shipping_battery_level_charge_mode": {"constraint": "false"},
+
+            "main.use.init -> main.use.power_on":                           {"weight": "20", "penwidth": "2"},
+            "main.use.power_on -> main.use.self_test":                      {"weight": "20", "penwidth": "2"},
+            "main.use.self_test -> main.use.ready":                         {"weight": "20", "penwidth": "2"},
+            "main.use.ready -> main.use.reading_cassette":                  {"weight": "15", "penwidth": "2"},
+            "main.use.detecting_fluid -> main.use.test_running":            {"weight": "15", "penwidth": "2"},
+            "main.use.test_running -> main.use.test_validation":            {"weight": "15", "penwidth": "2"},
+            "main.use.test_validation -> main.use.test_complete":           {"weight": "15", "penwidth": "2"}
+          }
+        }
+      |
+    }
+  }
+}
+
+direction: down
+
+title: |md
+  # Hera Reader Workflow State Machine
+| {
+  near: top-center
+  shape: text
+  style.font-size: 22
+}
+
+# ── Main layout row ──
+
+main: "" {
+  direction: right
+  style.fill: transparent
+  style.stroke: transparent
+
+  # ── Normal Use (test workflow) ──
+
+  use: Normal Use {
+    direction: down
+    style.fill: "#f8fff8"
+    style.stroke: "#88bb88"
+
+    init: _ {shape: circle; style.fill: "#333"}
+    power_on: POWER-ON {style.fill: "#ddeeff"}
+    self_test: SELF-TEST {style.fill: "#ddeeff"}
+    ready: READY {style.fill: "#90EE90"; style.bold: true}
+    reading_cassette: READING CASSETTE {style.fill: "#d4edda"}
+    heating_cassette: HEATING CASSETTE {style.fill: "#d4edda"}
+    test_auth: TEST AUTH {style.fill: "#d4edda"}
+    detecting_fluid: DETECTING FLUID {style.fill: "#d4edda"}
+    test_running: TEST RUNNING {style.fill: "#FFD700"; style.bold: true}
+    test_validation: TEST VALIDATION {style.fill: "#d4edda"}
+    test_complete: TEST COMPLETE {style.fill: "#87CEEB"}
+    self_check_pass: SELF CHECK PASS {style.fill: "#90EE90"}
+    self_check_fail: SELF CHECK FAIL {style.fill: "#FFB6C1"}
+
+    init -> power_on
+    power_on -> self_test: power on
+    self_test -> ready: self-test pass {style.stroke: "#2d8a2d"; style.stroke-width: 3}
+    ready -> reading_cassette: insert cassette
+    reading_cassette -> detecting_fluid: "[no heater]"
+    detecting_fluid -> test_running: detected fluid
+    test_running -> test_validation: test time complete
+    test_validation -> test_complete: last test valid
+    test_complete -> self_test: remove cassette
+    test_complete -> reading_cassette: insert cassette
+    test_validation -> self_check_pass: self-check assay passed
+    self_check_pass -> self_test: remove cassette
+    self_check_pass -> reading_cassette: insert cassette
+    test_validation -> self_check_fail: self-check assay failed
+    self_check_fail -> self_test: remove cassette
+    self_check_fail -> reading_cassette: insert cassette
+    reading_cassette -> test_auth: "[auth req'd]"
+    test_auth -> detecting_fluid: authorisation granted
+    reading_cassette -> heating_cassette: "[heater]"
+    heating_cassette -> detecting_fluid: "[no auth]"
+    heating_cassette -> test_auth: "[auth req'd]"
+    ready -> self_test: mains power disconnected
+    ready -> self_test: go to self-test
+  }
+
+  right_col: "" {
+    direction: down
+    style.fill: transparent
+    style.stroke: transparent
+
+    svc: Service and Production {
+      style.fill: "#fdf5e6"
+      style.stroke: "#d4a017"
+      grid-columns: 1
+
+      clean_mode: CLEAN MODE
+      device_cleaning: DEVICE CLEANING
+      ble_ota: BLE OTA
+      ota_success: OTA SUCCESS
+      usb_comms_mode: USB COMMS MODE
+      reboot: REBOOT
+
+      usb_comms_mode -> reboot: mains power disconnected
+      clean_mode -> device_cleaning: cleaning device
+    }
+
+    ship: Shipping Battery {
+      direction: down
+      style.fill: "#fde8fd"
+      style.stroke: "#9932CC"
+
+      shipping_battery_level_charge_mode: CHARGE MODE
+      shipping_battery_level_discharge_mode: DISCHARGE MODE
+      shipping_level_reached: LEVEL REACHED
+      shutting_down_reader: SHUTTING DOWN
+
+      shipping_battery_level_charge_mode -> shipping_level_reached: battery at shipping level
+      shipping_level_reached -> shutting_down_reader: mains power disconnected
+      shipping_battery_level_charge_mode -> shipping_battery_level_discharge_mode: discharge to shipping battery level
+      shipping_battery_level_discharge_mode -> shipping_level_reached: battery at shipping level
+      shipping_battery_level_discharge_mode -> shipping_battery_level_charge_mode: charge to shipping battery level
+    }
+
+    svc -> ship: {style.opacity: 0}
+  }
+
+  right_col.svc.usb_comms_mode -> right_col.ship.shipping_battery_level_charge_mode: charge to shipping battery level
+  right_col.svc.usb_comms_mode -> right_col.ship.shipping_battery_level_discharge_mode: discharge to shipping battery level
+  use.ready -> right_col.svc.clean_mode: cleaning mode
+  right_col.svc.device_cleaning -> use.self_test: power on
+  right_col.svc.clean_mode -> use.self_test: cancel cleaning mode
+  right_col.svc.clean_mode -> use.self_test: timeout cleaning mode
+  use.ready -> right_col.ship.shipping_battery_level_charge_mode: charge to shipping battery level
+  use.ready -> right_col.ship.shipping_battery_level_discharge_mode: discharge to shipping battery level
+  use.self_test -> right_col.svc.ota_success: ble update success
+  right_col.svc.ota_success -> use.ready: self-test pass
+}
+
+# ── Error Group ──
+
+err: Error States (19 total) {
+  style.fill: "#fde8e8"
+  style.stroke: "#cc4444"
+  style.border-radius: 8
+
+  categories: |md
+    **Cassette (7):** USED CASSETTE, CONTAMINATED CASSETTE, INVALID CASSETTE ...
+    **Test (4):** TEST, FLUID DETECTION, FLUID ALREADY PRESENT ...
+    **System (3):** SYSTEM, SYSTEM MEMORY, OTA
+    **Hardware (2):** HARDWARE ERROR, HEATER OVER TEMPERATURE ERROR
+    **Environment (1):** ENVIRONMENT ERROR
+    **Power (1):** POWER ERROR
+    **Time (1):** TIME ERROR
+  | {
+    shape: text
+    style.font-size: 12
+  }
+}
+
+# ── Legend / Notes ──
+
+legend: Return Paths and Global Transitions {
+  style.fill: "#f5f5f5"
+  style.stroke: "#999999"
+  style.border-radius: 6
+
+  content: |md
+    **Return paths** (upward, not drawn to reduce clutter):
+    TEST COMPLETE -> remove cassette -> SELF-TEST
+    DEVICE CLEANING -> power on -> SELF-TEST
+    OTA SUCCESS -> self-test pass -> READY
+    Error States -> recover -> SELF-TEST
+
+    **Global transitions** (from any state):
+    heater over temperature -> HEATER OVER TEMPERATURE ERROR
+    system error -> SYSTEM ERROR
+    hardware fault detected -> HARDWARE ERROR
+    usb comms connected -> USB COMMS MODE
+    start ble fail -> OTA ERROR
+    start ble update -> BLE OTA
+  | {
+    shape: text
+    style.font-size: 11
+  }
+}
+
+main.use -> err: Any assay state -> Error States on failure {
+  style.stroke: "#cc4444"
+  style.stroke-dash: 5
+  style.font-color: "#cc4444"
+  style.font-size: 12
+}
+
+err -> legend: {style.opacity: 0}
