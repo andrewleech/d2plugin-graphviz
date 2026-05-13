@@ -1,0 +1,36 @@
+direction: down
+
+title: Job Worker (untuned) {
+  near: top-center
+  shape: text
+  style.font-size: 22
+  style.bold: true
+}
+
+vars: {
+  d2-config: {
+    data: {
+      graphviz: |
+        {"global_attrs": {"nodesep": "0.6", "ranksep": "0.8"}}
+      |
+    }
+  }
+}
+
+ready: READY {style.fill: "#ddeeff"}
+claimed: CLAIMED {style.fill: "#FFD700"}
+processing: PROCESSING {style.fill: "#FFD700"; style.bold: true}
+completed: COMPLETED {style.fill: "#90EE90"; style.bold: true}
+failed: FAILED {style.fill: "#FFB6C1"}
+retrying: RETRYING {style.fill: "#FFB6C1"}
+dead_letter: DEAD LETTER {style.fill: "#cccccc"}
+
+ready -> claimed: worker poll
+claimed -> processing: lock acquired
+processing -> completed: success
+processing -> failed: exception
+failed -> retrying: attempts < 5
+retrying -> ready: backoff elapsed
+failed -> dead_letter: attempts == 5
+completed -> ready: ack, next job
+claimed -> ready: lock lost

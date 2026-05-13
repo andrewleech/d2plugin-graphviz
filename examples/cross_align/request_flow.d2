@@ -1,0 +1,52 @@
+direction: down
+
+title: Request Flow with Audit Trail (untuned) {
+  near: top-center
+  shape: text
+  style.font-size: 22
+  style.bold: true
+}
+
+flow: "" {
+  direction: right
+  style.fill: transparent
+  style.stroke: transparent
+
+  service: Primary Service {
+    direction: down
+    style.fill: "#eef6ff"
+    style.stroke: "#6699cc"
+
+    receive: RECEIVE REQUEST {style.fill: "#ddeeff"}
+    auth: AUTHENTICATE {style.fill: "#ddeeff"}
+    rate_limit: RATE-LIMIT CHECK {style.fill: "#ddeeff"}
+    validate: VALIDATE PAYLOAD {style.fill: "#ddeeff"}
+    process: PROCESS {style.fill: "#FFD700"; style.bold: true}
+    serialize: SERIALIZE RESPONSE {style.fill: "#ddeeff"}
+    respond: RESPOND {style.fill: "#90EE90"; style.bold: true}
+
+    receive -> auth
+    auth -> rate_limit
+    rate_limit -> validate
+    validate -> process
+    process -> serialize
+    serialize -> respond
+  }
+
+  audit: Audit Trail {
+    direction: down
+    style.fill: "#fdf5e6"
+    style.stroke: "#d4a017"
+
+    log_in: LOG INBOUND {style.fill: "#ffeebb"}
+    log_decision: LOG DECISION {style.fill: "#ffeebb"}
+    log_out: LOG OUTBOUND {style.fill: "#ffeebb"}
+
+    log_in -> log_decision
+    log_decision -> log_out
+  }
+}
+
+flow.service.receive -> flow.audit.log_in: write
+flow.service.validate -> flow.audit.log_decision: write
+flow.service.respond -> flow.audit.log_out: write

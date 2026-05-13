@@ -1,0 +1,58 @@
+# Declare the classes at root scope. The plugin recognises these names
+# and maps them to graphviz attrs (no-constraint → constraint=false;
+# bold-path → weight=10, style=bold). The D2 styling alongside makes
+# the same edges visually distinct in the rendered SVG.
+classes: {
+  no-constraint: {
+    style.stroke-dash: 4
+    style.opacity: 0.6
+  }
+  bold-path: {
+    style.stroke-width: 3
+    style.stroke: "#2d8a2d"
+  }
+}
+
+direction: down
+
+title: Job Worker (tuned) {
+  near: top-center
+  shape: text
+  style.font-size: 22
+  style.bold: true
+}
+
+vars: {
+  d2-config: {
+    data: {
+      graphviz: |
+        {"global_attrs": {"nodesep": "0.6", "ranksep": "0.8"}}
+      |
+    }
+  }
+}
+
+ready: READY {style.fill: "#ddeeff"}
+claimed: CLAIMED {style.fill: "#FFD700"}
+processing: PROCESSING {style.fill: "#FFD700"; style.bold: true}
+completed: COMPLETED {style.fill: "#90EE90"; style.bold: true}
+failed: FAILED {style.fill: "#FFB6C1"}
+retrying: RETRYING {style.fill: "#FFB6C1"}
+dead_letter: DEAD LETTER {style.fill: "#cccccc"}
+
+# Happy path — bold-path adds weight=10 and visual emphasis so dot keeps it
+# straight and centred.
+ready -> claimed: worker poll {class: bold-path}
+claimed -> processing: lock acquired {class: bold-path}
+processing -> completed: success {class: bold-path}
+
+# Side branches — laid out normally.
+processing -> failed: exception
+failed -> retrying: attempts < 5
+failed -> dead_letter: attempts == 5
+
+# Back-edges — no-constraint takes them out of rank assignment so they
+# don't pull READY downward or stretch the column.
+completed -> ready: ack, next job {class: no-constraint}
+retrying -> ready: backoff elapsed {class: no-constraint}
+claimed -> ready: lock lost {class: no-constraint}

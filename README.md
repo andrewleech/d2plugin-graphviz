@@ -142,7 +142,7 @@ DUMP_DOT_INPUT=path/to/input.d2 go test -run TestDumpDot -v ./internal/graphviz/
 
 ### Class shortcuts
 
-D2's `classes: [name]` on a node or edge gets recognised by the plugin against these built-ins:
+Declare a class at root scope with `classes: { ... }`, attach it to an edge or node with `class: name` (singular), and the plugin will match the name against these built-ins:
 
 | Class | Effect |
 | --- | --- |
@@ -152,14 +152,16 @@ D2's `classes: [name]` on a node or edge gets recognised by the plugin against t
 
 User-defined classes in `classes` (the schema field above) override built-ins of the same name.
 
-Heads up though: D2 v0.7.1 sometimes rejects `classes: [name]` directly on edges with "classes must be declared at a board root scope". If you hit that, declare them at the root first:
+Note on syntax: D2 v0.7.1 reserves `classes:` (plural) for the root-scope declaration and `class:` (singular) for the per-element reference. Putting `classes: [name]` on an edge will trigger `classes must be declared at a board root scope`.
 
 ```d2
 classes: {
-  no-constraint: {}
+  no-constraint: {style.stroke-dash: 4}  # D2-side styling is optional
 }
-foo -> bar: {classes: [no-constraint]}
+foo -> bar: {class: no-constraint}
 ```
+
+The graphviz-side effects (e.g. `constraint=false`) are applied even when the class body is empty.
 
 ## When to reach for it
 
@@ -168,6 +170,60 @@ foo -> bar: {classes: [no-constraint]}
 - State machines, pipeline graphs, anything with retry loops or recovery branches.
 
 If your graph is a simple tree or single flow with no back-edges, dagre is probably fine and you don't need this.
+
+## Examples
+
+Each subdirectory under [`examples/`](examples/) contains a focused diagram source plus rendered output for both engines. Re-render after edits with `scripts/render_examples.sh`.
+
+### State machine with retries — [`examples/state_machine/`](examples/state_machine/)
+
+Door access controller with retry, lockout, and sensor-fault transitions. The back-edges all converge on `LOCKED` — dagre routes them up the narrow right margin and stacks their labels; graphviz fans them out.
+
+<table>
+<tr><th>dagre</th><th>graphviz</th></tr>
+<tr>
+<td><img src="examples/state_machine/state_machine.dagre.svg" alt="dagre layout" width="420"></td>
+<td><img src="examples/state_machine/state_machine.graphviz.svg" alt="graphviz layout" width="420"></td>
+</tr>
+</table>
+
+### Pipeline with side-cluster failure handling — [`examples/pipeline/`](examples/pipeline/)
+
+Build/test pipeline plus a failure-response cluster. The parent container sets `direction: right` so the two clusters should sit side-by-side. Dagre ignores the parent direction and stacks them; graphviz honours it and lets the failure-edge fan route cleanly across.
+
+<table>
+<tr><th>dagre</th><th>graphviz</th></tr>
+<tr>
+<td><img src="examples/pipeline/pipeline.dagre.svg" alt="dagre layout" width="420"></td>
+<td><img src="examples/pipeline/pipeline.graphviz.svg" alt="graphviz layout" width="420"></td>
+</tr>
+</table>
+
+### Class shortcuts on back-edges — [`examples/class_shortcuts/`](examples/class_shortcuts/)
+
+Job worker with three back-edges into `READY` (lock lost, ack-next-job, retry-after-backoff). In the baseline graphviz render those back-edges share rank-assignment pressure with the forward edges; the label clutter at the top reflects that. The tuned variant marks them `class: no-constraint` (drops them from rank assignment) and the happy-path edges `class: bold-path` (`weight=10` to keep them straight, plus D2 styling for visual emphasis).
+
+<table>
+<tr><th>graphviz (baseline)</th><th>graphviz (tuned)</th></tr>
+<tr>
+<td><img src="examples/class_shortcuts/job_worker.graphviz.svg" alt="baseline" width="420"></td>
+<td><img src="examples/class_shortcuts/job_worker.tuned.svg" alt="tuned with classes" width="420"></td>
+</tr>
+</table>
+
+Note: D2 v0.7.1 wants the attribute on edges to be `class: name` (singular), even though the root-scope declaration is `classes: { ... }`. Mixing `classes: [name]` on an edge currently triggers `classes must be declared at a board root scope`.
+
+### Cross-cluster row alignment — [`examples/cross_align/`](examples/cross_align/)
+
+Primary service column with a parallel audit-trail cluster. Each service step writes a corresponding audit entry — but with seven service steps and only three audit entries, dot's edge-length minimisation parks the audit nodes at convenient ranks, not the rows you'd expect. `rank_groups` in the config pins each audit row to the service step that writes it.
+
+<table>
+<tr><th>graphviz (baseline)</th><th>graphviz (tuned)</th></tr>
+<tr>
+<td><img src="examples/cross_align/request_flow.graphviz.svg" alt="baseline" width="420"></td>
+<td><img src="examples/cross_align/request_flow.tuned.svg" alt="tuned with rank_groups" width="420"></td>
+</tr>
+</table>
 
 ## Limitations
 
