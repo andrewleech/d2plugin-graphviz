@@ -67,11 +67,30 @@ func BuildDot(g *d2graph.Graph, opts config.CLIOpts) (string, error) {
 	var sb strings.Builder
 
 	// ----- graph-wide attrs -----
-	// Precedence (highest wins): data.GlobalAttrs > CLI flags > defaults.
+	// Precedence (highest wins): data.GlobalAttrs > CLI flags > plugin
+	// defaults > graphviz defaults.
+	//
 	// compound=true is a hard requirement for ltail/lhead (cluster
-	// boundary edge routing). We set it here and let the user override
-	// only by explicitly setting "compound":"false" in their config.
-	globalAttrs := map[string]string{"compound": "true"}
+	// boundary edge routing).
+	//
+	// nodesep and ranksep are bumped from graphviz's defaults (0.25 and
+	// 0.5 inches) to values that pair sensibly with the default cluster
+	// margin "40,30" emitted below. With margin=40 on each side of two
+	// adjacent clusters, nodesep<0.8 inches produces zero or negative
+	// visible space between cluster boundaries — defaulting to 1.0
+	// gives ~15 px of inter-cluster horizontal gap. Similarly ranksep
+	// 1.0 gives clear vertical breathing room between cluster labels
+	// and adjacent cluster contents.
+	//
+	// newrank=true is enabled by default so rank constraints propagate
+	// across cluster boundaries (necessary for align_top_with /
+	// align_bottom_with to work).
+	globalAttrs := map[string]string{
+		"compound": "true",
+		"nodesep":  "2.5",
+		"ranksep":  "2.5",
+		"newrank":  "true",
+	}
 	rankdir, ok := opts.Attr("rankdir")
 	if !ok {
 		rankdir = rootDirectionToRankdir(g.Root.Direction.Value)
@@ -94,7 +113,8 @@ func BuildDot(g *d2graph.Graph, opts config.CLIOpts) (string, error) {
 	sb.WriteString("  node [shape=box, fixedsize=true, label=\"\"];\n")
 	sb.WriteString("  edge [label=\"\"];\n\n")
 
-	ctx := buildCtx{rankdir: globalAttrs["rankdir"], data: data}
+	aligns := make([]alignRequest, 0)
+	ctx := buildCtx{rankdir: globalAttrs["rankdir"], data: data, alignRequests: &aligns}
 
 	// ----- node + cluster tree -----
 	// Top-level children of root. Root itself isn't emitted.
@@ -117,6 +137,18 @@ func BuildDot(g *d2graph.Graph, opts config.CLIOpts) (string, error) {
 			quoted[i] = dotQuote(id)
 		}
 		fmt.Fprintf(&sb, "  {rank=same; %s;}\n", strings.Join(quoted, "; "))
+	}
+
+	// ----- rank=same groups from align_top_with / align_bottom_with --
+	//
+	// Emit a top-level `{rank=same; ...}` group that pins the source
+	// leaf and target leaf to the same rank. We deliberately do NOT
+	// pair this with a high-weight invisible edge — dot's edge-length
+	// minimisation would otherwise pull the source's cluster
+	// horizontally toward the target's column.
+	for _, req := range aligns {
+		fmt.Fprintf(&sb, "  {rank=same; %s; %s;}\n",
+			dotQuote(req.srcLeaf), dotQuote(req.targetLeaf))
 	}
 
 	sb.WriteString("}\n")
@@ -208,8 +240,9 @@ func isBareNumeral(v string) bool {
 
 // buildCtx threads graph-wide state into the recursive writer.
 type buildCtx struct {
-	rankdir string
-	data    config.DataConfig
+	rankdir       string
+	data          config.DataConfig
+	alignRequests *[]alignRequest // collected during traversal, emitted at end of BuildDot
 }
 
 // classAttrs collects built-in and user-defined class-shortcut attrs
@@ -242,22 +275,72 @@ func writeObject(sb *strings.Builder, o *d2graph.Object, indent string, ctx buil
 		cattrs := map[string]string{"label": o.Label.Value}
 		if isInvisibleContainer(o) {
 			cattrs["style"] = "invis"
+		} else {
+			// Defaults applied to every visible cluster so users don't
+			// have to repeat the same margin / label-position attrs on
+			// every cluster_attrs entry. Asymmetric margin (horiz, vert)
+			// gives the cluster label visible space above the contents.
+			// Top-left label position matches typical document figure
+			// conventions. User overrides via ClusterAttrs win.
+			cattrs["margin"] = "40,30"
+			cattrs["labelloc"] = "t"
+			cattrs["labeljust"] = "l"
 		}
 		// Merge data.ClusterAttrs (user overrides).
 		for k, v := range ctx.data.ClusterAttrs[absID(o)] {
 			cattrs[k] = v
 		}
+		// Extract plugin-only keys before forwarding the remaining
+		// attrs to dot. These keys are not dot attributes; they trigger
+		// spacer-node emission, rank-group registration, or per-cluster
+		// rank-hint overrides by the plugin.
+		pluginAttrs := stripPluginClusterKeys(cattrs)
 		writeAttrListLines(sb, cattrs, indent+"  ")
+
+		// Top padding via invisible spacer node + high-weight invis edge
+		// to first leaf. dot's rank algorithm places the spacer one
+		// rank above the first leaf, extending the cluster bounding
+		// box upward.
+		if pt := pluginAttrs["padding_top"]; pt != "" {
+			emitTopPaddingSpacer(sb, o, pt, indent+"  ")
+		}
 
 		// Children.
 		for _, c := range o.ChildrenArray {
 			writeObject(sb, c, indent+"  ", ctx)
 		}
-		// Per-container direction hint.
-		if hint := rankSameHint(o, ctx.rankdir); hint != "" {
-			fmt.Fprintf(sb, "%s  %s\n", indent, hint)
+
+		// Bottom padding mirror.
+		if pb := pluginAttrs["padding_bottom"]; pb != "" {
+			emitBottomPaddingSpacer(sb, o, pb, indent+"  ")
+		}
+
+		// Per-container direction hint. `rank_same_anchor` (plugin-only)
+		// overrides the default behaviour of pinning the first leaves;
+		// "last" pins last leaves, "none" suppresses the hint.
+		anchor := pluginAttrs["rank_same_anchor"]
+		if anchor != "none" {
+			if hint := rankSameHintWithAnchor(o, ctx.rankdir, anchor); hint != "" {
+				fmt.Fprintf(sb, "%s  %s\n", indent, hint)
+			}
 		}
 		fmt.Fprintf(sb, "%s}\n", indent)
+
+		// Cross-cluster rank-anchor requests. Registered now and
+		// emitted as top-level `{rank=same; ...}` groups after all
+		// clusters have been written (see BuildDot tail).
+		if a := pluginAttrs["align_top_with"]; a != "" {
+			*ctx.alignRequests = append(*ctx.alignRequests, alignRequest{
+				srcLeaf:    absID(firstLeaf(o)),
+				targetLeaf: resolveAlignTarget(o, a, "top"),
+			})
+		}
+		if a := pluginAttrs["align_bottom_with"]; a != "" {
+			*ctx.alignRequests = append(*ctx.alignRequests, alignRequest{
+				srcLeaf:    absID(lastLeaf(o)),
+				targetLeaf: resolveAlignTarget(o, a, "bottom"),
+			})
+		}
 		return
 	}
 	// Leaf node.
@@ -339,6 +422,45 @@ func rankSameHint(o *d2graph.Object, rankdir string) string {
 		var leaf *d2graph.Object
 		if isContainer(c) {
 			leaf = firstLeaf(c)
+		} else {
+			leaf = c
+		}
+		ids = append(ids, dotQuote(absID(leaf)))
+	}
+	if len(ids) < 2 {
+		return ""
+	}
+	return "{rank=same; " + strings.Join(ids, "; ") + ";}"
+}
+
+// rankSameHintWithAnchor is rankSameHint with control over which leaf
+// of each child is used. anchor == "last" uses the last leaf; "" or
+// any other value uses the first leaf (matches the legacy behaviour).
+func rankSameHintWithAnchor(o *d2graph.Object, rankdir, anchor string) string {
+	if anchor != "last" {
+		return rankSameHint(o, rankdir)
+	}
+	dir := o.Direction.Value
+	if dir == "" {
+		return ""
+	}
+	perpendicular := map[string]string{
+		"TB": "right",
+		"BT": "right",
+		"LR": "down",
+		"RL": "down",
+	}
+	if perpendicular[rankdir] != dir && !(rankdir == "TB" && dir == "left") &&
+		!(rankdir == "BT" && dir == "left") &&
+		!(rankdir == "LR" && dir == "up") &&
+		!(rankdir == "RL" && dir == "up") {
+		return ""
+	}
+	var ids []string
+	for _, c := range o.ChildrenArray {
+		var leaf *d2graph.Object
+		if isContainer(c) {
+			leaf = lastLeaf(c)
 		} else {
 			leaf = c
 		}
