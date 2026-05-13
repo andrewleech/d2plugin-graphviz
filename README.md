@@ -1,22 +1,10 @@
 # d2plugin-graphviz
 
-A D2 layout plugin that uses Graphviz `dot` for layout while keeping
-D2's SVG rendering. Designed for diagrams where D2's bundled dagre and
-ELK engines produce stretched or cluster-misaligned output — regulated
-software documentation (IEC 62304 SDS, SAD, ICD), state-machine
-reference diagrams, and the like.
+D2 source, Graphviz layout, D2 rendering.
 
-## What it does
+D2's dagre and ELK engines get tricky once you have clusters, back-edges, or things that need to line up across cluster boundaries. The diagrams come out stretched, the back-edges get drawn through node labels, and `rank=same` doesn't propagate where you want it. Graphviz `dot` handles those layouts pretty well, it just renders ugly compared to D2.
 
-1. D2 parses `.d2` source and produces a graph JSON.
-2. This plugin translates that graph into Graphviz `.dot`, shells out
-   to `dot -Tjson`, and maps positions and spline edge routes back.
-3. D2 renders the positioned graph with its own SVG renderer — fonts,
-   colours, icons, rounded-corner shapes, etc.
-
-You get Graphviz's layout control (`rank=same`, `constraint=false`,
-`minlen`, `weight`, subgraph clusters, spline routing that avoids
-nodes) with D2's visual style.
+This plugin uses each tool for what it's good at. D2 parses your `.d2` source as usual. The plugin converts the parsed graph to a `.dot` file, shells out to `dot -Tjson` for positions and edge routes, and feeds the positioned graph back to D2's SVG renderer. You get D2's fonts/colours/rounded shapes with graphviz's layout control.
 
 ## Install
 
@@ -24,17 +12,15 @@ nodes) with D2's visual style.
 go install github.com/andrewleech/d2plugin-graphviz/cmd/d2plugin-graphviz@latest
 ```
 
-This drops a `d2plugin-graphviz` binary into `$GOBIN` (default
-`$GOPATH/bin`). D2 discovers layout plugins named `d2plugin-<name>` in
-`$PATH`, so that directory must be on `$PATH`.
+That drops a `d2plugin-graphviz` binary into `$GOBIN` (default `$GOPATH/bin`). D2 discovers plugins by name in `$PATH`, so that directory has to be on `$PATH`.
 
-Runtime requirement: the Graphviz `dot` binary must be in `$PATH`.
+You also need the graphviz `dot` binary:
 
 ```sh
 # macOS
 brew install graphviz
 
-# Debian/Ubuntu
+# Debian / Ubuntu
 apt install graphviz
 ```
 
@@ -44,58 +30,72 @@ apt install graphviz
 d2 --layout graphviz input.d2 output.svg
 ```
 
-`d2 --help` will list the plugin's flags once it's discovered.
+or set `D2_LAYOUT=graphviz` in the environment. `d2 --layout graphviz --help` lists the plugin's flags.
+
+## What you get out of the box
+
+A bunch of defaults are baked in so a fresh diagram with no config looks sensible:
+
+- `compound=true`, `newrank=true` so rank constraints work across cluster boundaries.
+- `nodesep=2.5`, `ranksep=2.5` so cluster boundaries don't touch when the per-cluster margin (below) is on. The graphviz defaults of 0.25 / 0.5 are too tight for any diagram with multiple visible clusters.
+- Per visible cluster: `margin="40,30"` (asymmetric, 40pt horizontal, 30pt vertical), `labelloc=t`, `labeljust=l`. Gives the cluster label visible space above its contents and matches typical figure-caption convention.
+- D2 root `direction` maps to graphviz `rankdir` automatically (`down` → `TB`, `right` → `LR`, etc).
+- Invisible D2 edges (`style.opacity: 0`) come through as `[style=invis]` in dot, so any stacking tricks you already use (e.g. `a -> b: {style.opacity: 0}` to force ordering) still work.
+- Transparent containers (`style.fill: transparent` and `style.stroke: transparent`) become `style=invis` subgraph clusters. They carry layout semantics without drawing a border, which is what you want for pure grouping.
+- Cross-container edges get `compound=true, ltail=..., lhead=...` so they anchor to the cluster boundary rather than a leaf node.
+
+All defaults can be overridden, see Configuration.
+
+## Plugin-only cluster attributes
+
+The plugin adds a few cluster-attr keys that aren't dot attributes; the plugin consumes them and emits the equivalent dot structures (invisible spacer nodes, rank groups, etc).
+
+| Key | Purpose |
+| --- | --- |
+| `padding_top` | Invisible vertical space above the cluster's first leaf, in inches. Implemented as a zero-width invisible node + high-weight constraint edge to the first leaf. Be careful with large `ranksep` though, each extra invisible node consumes a full rank gap. |
+| `padding_bottom` | Mirror of `padding_top` on the last leaf. |
+| `align_top_with` | AbsID of another cluster. Emits a top-level `{rank=same; src_first_leaf; target_last_leaf}` that pins this cluster's top against the target. Useful for placing a side cluster (e.g. an error-handler column) at a specific row of the main flow column. |
+| `align_bottom_with` | Mirror on the last leaf of this cluster. |
+| `rank_same_anchor` | Override which leaf of each child is used when the plugin auto-emits `{rank=same; ...}` for `direction: right` (or `direction: up`) containers. `"first"` (default) pins tops. `"last"` pins bottoms; useful when child columns have different lengths and you want the trailing content aligned. `"none"` suppresses the hint entirely. |
+
+Each goes in `cluster_attrs` under the cluster's AbsID, same as any other override:
+
+```d2
+vars: {
+  d2-config: {
+    data: {
+      graphviz: "{\"cluster_attrs\": {\"root.errors\": {\"align_top_with\": \"root.flow.signal_ext\"}}}"
+    }
+  }
+}
+```
 
 ## Configuration
 
-There are four layers, evaluated in this precedence (highest wins):
+There are four layers, evaluated highest-wins:
 
-1. **Defaults baked into the plugin** — sensible choices for a simple
-   graph. `splines=true`, `newrank=true`, `rankdir` derived from the
-   D2 root `direction`, invisible edges and transparent containers
-   mapped to `[style=invis]`.
-2. **CLI flags** — graph-wide Graphviz attributes.
-3. **`vars.d2-config.data.graphviz` in the D2 source** — full
-   expressivity including per-node, per-edge, per-cluster overrides
-   and rank groups.
-4. **`classes: [...]`** in the D2 source — per-element shortcuts.
+1. **Plugin defaults** (above).
+2. **CLI flags** for graph-wide attrs. Useful when you don't want config in the source.
+3. **`vars.d2-config.data.graphviz`** in the source. JSON-encoded string, gives per-node / per-edge / per-cluster overrides plus rank groups.
+4. **`classes: [...]`** in the source. Per-element shortcuts that map to bundled or user-defined attribute sets.
 
-### Layer 2: CLI flags
+### CLI flags
 
-All flags are prefixed `--graphviz-`. Full list in `d2 --layout graphviz --help`:
+All prefixed `--graphviz-`. Full list in `d2 --layout graphviz --help`. The common ones:
 
-| Flag | Maps to Graphviz | Notes |
+| Flag | Graphviz attr | Notes |
 | --- | --- | --- |
-| `--graphviz-rankdir` | `rankdir` | `TB`, `BT`, `LR`, `RL`. Empty = derive from root `direction`. |
-| `--graphviz-nodesep` | `nodesep` | Inches between sibling nodes. |
+| `--graphviz-rankdir` | `rankdir` | `TB`, `BT`, `LR`, `RL`. Empty derives from root `direction`. |
+| `--graphviz-nodesep` | `nodesep` | Inches between siblings at the same rank. |
 | `--graphviz-ranksep` | `ranksep` | Inches between ranks. |
-| `--graphviz-splines` | `splines` | `true`, `polyline`, `ortho`, `spline`, `curved`, `false`. |
-| `--graphviz-size` | `size` | Canvas size, e.g. `7.3,10.2` for A4 portrait. |
+| `--graphviz-splines` | `splines` | `true`, `spline`, `polyline`, `ortho`, `curved`, `false`. |
+| `--graphviz-size` | `size` | Canvas bound, e.g. `7.3,10.2` for A4 portrait. |
 | `--graphviz-ratio` | `ratio` | `fill`, `compress`, `expand`, `auto`, or a number. |
-| `--graphviz-dpi` | `dpi` | Output DPI. Default 72 (matches D2's pixel space 1:1). |
-| `--graphviz-newrank` | `newrank` | `true` / `false`. |
-| `--graphviz-concentrate` | `concentrate` | Merge parallel edges. |
-| `--graphviz-overlap` | `overlap` | Overlap resolution (mostly for non-dot engines). |
-| `--graphviz-margin` | `margin` | Graph-wide margin. |
-| `--graphviz-pad` | `pad` | Graph-wide pad. |
+| `--graphviz-newrank` | `newrank` | `true` / `false`. Default `true`. |
 
-Example: compact A4 portrait fit at 200 DPI:
+### vars.d2-config.data.graphviz
 
-```sh
-d2 --layout graphviz \
-   --graphviz-size "7.3,10.2" \
-   --graphviz-ratio compress \
-   --graphviz-dpi 200 \
-   --graphviz-nodesep 0.2 \
-   --graphviz-ranksep 0.3 \
-   input.d2 output.png
-```
-
-### Layer 3: `vars.d2-config.data.graphviz`
-
-D2's config parser (as of v0.7.1) preserves only flat primitives and
-arrays of primitives inside `vars.d2-config.data`. To pass a rich
-graphviz configuration, encode it as a **JSON string**:
+D2's config parser (as of v0.7.1) only preserves flat primitives inside `vars.d2-config.data`, nested maps get dropped. The workaround is to encode the config as a JSON string:
 
 ```d2
 vars: {
@@ -106,24 +106,17 @@ vars: {
           \"rankdir\": \"TB\",
           \"nodesep\": \"0.25\",
           \"ranksep\": \"0.3\",
-          \"splines\": \"spline\",
-          \"newrank\": \"true\"
+          \"splines\": \"spline\"
         },
-        \"rank_groups\": [
-          [\"main.right_col.svc\", \"main.right_col.ship\"],
-          [\"main.use.heating_cassette\", \"main.use.test_auth\"]
-        ],
         \"cluster_attrs\": {
-          \"main.use\": {\"margin\": \"8\", \"penwidth\": \"1.5\"}
-        },
-        \"node_attrs\": {
-          \"main.use.ready\": {\"penwidth\": \"2\"}
+          \"main.use\": {\"penwidth\": \"1.5\"}
         },
         \"edge_attrs\": {
-          \"main.use.test_complete -> main.use.self_test\": {\"constraint\": \"false\"},
-          \"main.use.self_check_pass -> main.use.self_test\": {\"constraint\": \"false\"},
-          \"main.use.init -> main.use.power_on\": {\"weight\": \"10\", \"penwidth\": \"2\"}
-        }
+          \"main.use.test_complete -> main.use.self_test\": {\"constraint\": \"false\"}
+        },
+        \"rank_groups\": [
+          [\"main.right_col.svc\", \"main.right_col.ship\"]
+        ]
       }"
     }
   }
@@ -137,79 +130,52 @@ Schema:
 | `global_attrs` | `map<string,string>` | Merged into the graph-level `graph [...]` block. Overrides CLI flags. |
 | `rank_groups` | `[[string]]` | Each inner list becomes `{rank=same; ...}` at the top level. Keys are D2 AbsIDs. |
 | `node_attrs` | `map<AbsID, map<string,string>>` | Per-leaf node attribute overrides. |
-| `edge_attrs` | `map<key, map<string,string>>` | Per-edge overrides. Key is `"<SrcAbsID> -> <DstAbsID>"` (first match of that pair) or `"(Src -> Dst)[index]"` for parallel edges. |
-| `cluster_attrs` | `map<AbsID, map<string,string>>` | Per-container (subgraph cluster) overrides. |
+| `edge_attrs` | `map<key, map<string,string>>` | Per-edge overrides. Key is `"<SrcAbsID> -> <DstAbsID>"` for the first match of that pair, or `"(Src -> Dst)[index]"` for parallel edges. |
+| `cluster_attrs` | `map<AbsID, map<string,string>>` | Per-container overrides. Recognises the plugin-only keys above plus any raw dot attr. |
 | `classes` | `map<class-name, map<string,string>>` | User-defined class-name shortcuts; see Layer 4. |
 
-AbsID is the D2-unique dotted path (e.g. `main.use.ready`). Use
-`d2plugin-graphviz` stderr output or the `examples/input.d2` dump in
-the repo's `internal/graphviz/dump_test.go` to see the AbsIDs D2
-generates for your input.
+AbsID is the D2 dotted path (e.g. `main.use.ready`). To see what AbsIDs D2 generates for your input, dump the emitted dot:
 
-### Layer 4: Class shortcuts
+```sh
+DUMP_DOT_INPUT=path/to/input.d2 go test -run TestDumpDot -v ./internal/graphviz/
+```
 
-D2 already supports `classes: [name]` on nodes and edges. The plugin
-recognises these built-in class names and applies the corresponding
-Graphviz attrs:
+### Class shortcuts
+
+D2's `classes: [name]` on a node or edge gets recognised by the plugin against these built-ins:
 
 | Class | Effect |
 | --- | --- |
-| `no-constraint` | `constraint=false` — excludes the edge from rank assignment. Use this on back-edges and recovery transitions to stop them stretching the layout. |
-| `bold-path` | `style=bold, penwidth=2, weight=10` — emphasised happy-path edge with layout pressure to stay straight. |
-| `rank-same` | `group=rank-same` — a Graphviz grouping hint. For true cross-cluster alignment use `rank_groups` in Layer 3. |
+| `no-constraint` | `constraint=false`. Excludes the edge from rank assignment. Use on back-edges and recovery transitions so they don't stretch the layout. |
+| `bold-path` | `style=bold, penwidth=2, weight=10`. Emphasised happy-path edge with layout pressure to stay straight. |
+| `rank-same` | `group=rank-same`. Graphviz grouping hint. For true cross-cluster alignment use `rank_groups` instead. |
 
-User-defined classes in Layer 3's `classes` map override built-ins
-with the same key.
+User-defined classes in `classes` (the schema field above) override built-ins of the same name.
 
-Example:
+Heads up though: D2 v0.7.1 sometimes rejects `classes: [name]` directly on edges with "classes must be declared at a board root scope". If you hit that, declare them at the root first:
 
 ```d2
-happy_path: {
-  style.stroke-width: 3
+classes: {
+  no-constraint: {}
 }
-ready -> reading_cassette: { classes: [bold-path] }
-test_complete -> self_test: remove cassette { classes: [no-constraint] }
+foo -> bar: {classes: [no-constraint]}
 ```
 
-## Smart defaults (Layer 1)
+## When to reach for it
 
-The plugin translates several D2 conventions automatically without
-any config:
+- Multiple clusters that need to align along a particular row or column.
+- Back-edges and error transitions that you don't want pulling the main flow around.
+- State machines, pipeline graphs, anything with retry loops or recovery branches.
 
-- **Root `direction`** → `rankdir` (down → TB, right → LR, etc).
-- **Invisible edges** (`style.opacity: 0` in D2) → `[style=invis]` in
-  dot. Lets the existing stacking tricks (`a -> b: {style.opacity:0}`)
-  continue to work.
-- **Transparent containers** (both `style.fill: transparent` and
-  `style.stroke: transparent`) → `style=invis` subgraph clusters.
-  Carries layout semantics without drawing a border — useful for pure
-  grouping.
-- **Per-container `direction`** → when a container's `direction` is
-  perpendicular to the effective rankdir, the plugin emits
-  `{rank=same; <first-leaves>}` inside that cluster to approximate a
-  lateral row/column. Graphviz does not support per-cluster `rankdir`
-  natively; this is a best-effort approximation.
-- **Cross-container edges** → `compound=true, ltail=..., lhead=...`
-  so the edge is anchored at the cluster boundary.
-- **Label positions** — populated with dagre-compatible defaults so
-  D2's post-plugin renderer doesn't nil-deref.
+If your graph is a simple tree or single flow with no back-edges, dagre is probably fine and you don't need this.
 
 ## Limitations
 
-- **Per-cluster `rankdir`** is a Graphviz limitation, not ours. The
-  plugin approximates it with rank hints; complex cases may need
-  explicit `rank_groups`.
-- **Text / markdown / code shapes** use their full measured width.
-  If a `shape: text` block has a very long line, the graph canvas
-  will grow to fit. Wrap or truncate in your D2 source to control
-  this, or use `--graphviz-size` to force a bounding box.
-- **Edge labels** are not passed to Graphviz for layout spacing —
-  dot doesn't receive label dimensions. Labels still render
-  correctly but may overlap other edges in dense graphs.
-- **Grid and sequence diagrams** are handled by D2 internally
-  before reaching the plugin. They arrive as opaque pre-sized
-  boxes.
-- **Edge-label collision avoidance** is coarser than dagre's.
+- Per-cluster `rankdir` is a graphviz limitation, not ours. The plugin approximates it with rank hints; complex cases need explicit `rank_groups`.
+- Edge labels aren't sent to graphviz with their measured dimensions. The labels render correctly but dot doesn't reserve space for them, so dense graphs can get edge-label collisions. Coarser than dagre's edge-label avoidance.
+- `padding_top` / `padding_bottom` add a whole invisible rank each. If your `ranksep` is large (2-3 inches), even a small padding value adds a full ranksep gap to the cluster height. Use raw `margin: "60"` (scalar inches) as a cluster attr if you just want more inside padding, not an extra rank.
+- D2 grid and sequence diagrams are pre-laid-out by D2 before the plugin runs. They arrive as opaque pre-sized boxes; this plugin can't reshape them.
+- Text / markdown / code shapes use their measured width as-is. A long unbroken `shape: text` line will grow the canvas. Wrap or use `--graphviz-size` to constrain.
 
 ## Development
 
@@ -217,19 +183,19 @@ any config:
 go build ./...
 go test ./...
 
-# Rebuild + install + render examples/input.d2 with both layouts,
-# producing out/compare.html for visual diff:
+# Rebuild, install, render examples/input.d2 with both dagre and graphviz,
+# produces out/compare.html for a visual diff:
 scripts/eval.sh
 ```
 
-The `TestDumpDot` test in `internal/graphviz/` emits the .dot source
-the plugin would produce for any D2 file, useful for debugging:
+The `TestDumpDot` test dumps the dot source for any D2 file:
 
 ```sh
 DUMP_DOT_INPUT=examples/input.d2 go test -run TestDumpDot -v ./internal/graphviz/
 ```
 
-## License
+Handy when something's not laying out the way you'd expect and you want to see what the plugin is telling dot.
 
-Same as the project repo. The plugin depends on `oss.terrastruct.com/d2`
-which has its own licence (MPL-2.0 at time of writing).
+## Licence
+
+Same as the project repo. The plugin depends on `oss.terrastruct.com/d2` (MPL-2.0 at time of writing).
