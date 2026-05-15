@@ -1,0 +1,41 @@
+direction: down
+
+title: Release Workflow (baseline) {
+  near: top-center
+  shape: text
+  style.font-size: 22
+  style.bold: true
+}
+
+vars: {
+  d2-config: {
+    data: {
+      graphviz: |
+        {"global_attrs": {"nodesep": "0.6", "ranksep": "1.0"}}
+      |
+    }
+  }
+}
+
+draft: DRAFT {style.fill: "#ddeeff"}
+review: CODE REVIEW {style.fill: "#ddeeff"}
+approved: APPROVED {style.fill: "#ddeeff"}
+build: BUILD {style.fill: "#FFD700"}
+qa: QA SIGNOFF {style.fill: "#FFD700"; style.bold: true}
+stage: STAGED {style.fill: "#FFD700"}
+canary: CANARY {style.fill: "#FFD700"}
+release: RELEASED {style.fill: "#90EE90"; style.bold: true}
+
+# Main forward flow
+draft -> review
+review -> approved: lgtm
+approved -> build
+build -> qa
+qa -> stage: tests pass
+stage -> canary
+canary -> release: canary healthy
+
+# Recovery / back-edges spanning multiple ranks
+qa -> review: tests fail / revise
+canary -> approved: regression / re-approve
+release -> draft: next iteration

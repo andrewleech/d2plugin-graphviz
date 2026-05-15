@@ -1,0 +1,54 @@
+classes: {
+  no-constraint: {
+    style.stroke-dash: 4
+    style.opacity: 0.6
+  }
+  bold-path: {
+    style.stroke-width: 3
+    style.stroke: "#2d8a2d"
+  }
+}
+
+direction: down
+
+title: Release Workflow (tuned) {
+  near: top-center
+  shape: text
+  style.font-size: 22
+  style.bold: true
+}
+
+vars: {
+  d2-config: {
+    data: {
+      graphviz: |
+        {"global_attrs": {"nodesep": "0.6", "ranksep": "1.0"}}
+      |
+    }
+  }
+}
+
+draft: DRAFT {style.fill: "#ddeeff"}
+review: CODE REVIEW {style.fill: "#ddeeff"}
+approved: APPROVED {style.fill: "#ddeeff"}
+build: BUILD {style.fill: "#FFD700"}
+qa: QA SIGNOFF {style.fill: "#FFD700"; style.bold: true}
+stage: STAGED {style.fill: "#FFD700"}
+canary: CANARY {style.fill: "#FFD700"}
+release: RELEASED {style.fill: "#90EE90"; style.bold: true}
+
+# Main forward flow — bold-path keeps these ranked in order under
+# layout pressure and emphasises them visually.
+draft -> review {class: bold-path}
+review -> approved: lgtm {class: bold-path}
+approved -> build {class: bold-path}
+build -> qa {class: bold-path}
+qa -> stage: tests pass {class: bold-path}
+stage -> canary {class: bold-path}
+canary -> release: canary healthy {class: bold-path}
+
+# Recovery transitions — no-constraint takes them out of rank
+# assignment so they stop compressing the forward chain.
+qa -> review: tests fail / revise {class: no-constraint}
+canary -> approved: regression / re-approve {class: no-constraint}
+release -> draft: next iteration {class: no-constraint}

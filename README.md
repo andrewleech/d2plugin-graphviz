@@ -175,9 +175,9 @@ If your graph is a simple tree or single flow with no back-edges, dagre is proba
 
 Each subdirectory under [`examples/`](examples/) contains a focused diagram source plus rendered output for both engines. Re-render after edits with `scripts/render_examples.sh`.
 
-### State machine with retries — [`examples/state_machine/`](examples/state_machine/)
+### Two-cluster state machine — [`examples/state_machine/`](examples/state_machine/)
 
-Door access controller with retry, lockout, and sensor-fault transitions. The back-edges all converge on `LOCKED` — dagre routes them up the narrow right margin and stacks their labels; graphviz fans them out.
+Payment processing state machine with a happy-path column and a side cluster of exception states. Each exception transition (`validating -> validation_failed`, `authorizing -> auth_declined`, `capturing -> capture_failed`) crosses cluster boundaries. The parent container is `direction: right`, so the clusters belong side-by-side with the exceptions aligned to the states that produce them. Dagre ignores the parent direction and tangles the clusters; graphviz keeps them as two columns and lets each exception sit on the same row as its source state.
 
 <table>
 <tr><th>dagre</th><th>graphviz</th></tr>
@@ -189,25 +189,26 @@ Door access controller with retry, lockout, and sensor-fault transitions. The ba
 
 ### Pipeline with side-cluster failure handling — [`examples/pipeline/`](examples/pipeline/)
 
-Build/test pipeline plus a failure-response cluster. The parent container sets `direction: right` so the two clusters should sit side-by-side. Dagre ignores the parent direction and stacks them; graphviz honours it and lets the failure-edge fan route cleanly across.
+Build/test pipeline plus a failure-response cluster. The parent container sets `direction: right` so the two clusters should sit side-by-side. Dagre ignores the parent direction and stacks them; graphviz honours it. In the baseline graphviz render the failure cluster only has three nodes but stretches to the full height of the build chain, leaving a lot of empty space in the middle. The tuned variant uses `rank_groups` to pin `Notify Slack` to the row of `Lint` and `Rollback Last Release` to the row of `Publish`, plus `cluster_attrs.pipeline.rank_same_anchor: "none"` to suppress the plugin's auto-emitted top-anchor hint so the rank_groups aren't fighting it. The failure cluster compresses to the height of the stages it actually services.
 
 <table>
-<tr><th>dagre</th><th>graphviz</th></tr>
+<tr><th>dagre</th><th>graphviz (baseline)</th><th>graphviz (tuned)</th></tr>
 <tr>
-<td><img src="examples/pipeline/pipeline.dagre.svg" alt="dagre layout" width="420"></td>
-<td><img src="examples/pipeline/pipeline.graphviz.svg" alt="graphviz layout" width="420"></td>
+<td><img src="examples/pipeline/pipeline.dagre.svg" alt="dagre layout" width="280"></td>
+<td><img src="examples/pipeline/pipeline.graphviz.svg" alt="graphviz baseline" width="280"></td>
+<td><img src="examples/pipeline/pipeline.tuned.svg" alt="graphviz with rank_groups" width="280"></td>
 </tr>
 </table>
 
 ### Class shortcuts on back-edges — [`examples/class_shortcuts/`](examples/class_shortcuts/)
 
-Job worker with three back-edges into `READY` (lock lost, ack-next-job, retry-after-backoff). In the baseline graphviz render those back-edges share rank-assignment pressure with the forward edges; the label clutter at the top reflects that. The tuned variant marks them `class: no-constraint` (drops them from rank assignment) and the happy-path edges `class: bold-path` (`weight=10` to keep them straight, plus D2 styling for visual emphasis).
+Eight-state release workflow with three back-edges that each span several ranks: `qa -> review`, `canary -> approved`, `release -> draft`. In the baseline render every edge shares rank-assignment pressure, so the back-edges shorten the chain by pulling intermediate states off-axis — the main flow visibly bends sideways and the recovery-edge labels collide with nodes they don't belong to. The tuned variant marks back-edges `class: no-constraint` (drops them from rank assignment so they don't compress the forward chain) and happy-path edges `class: bold-path` (`weight=10` to keep them straight, plus D2 styling for visual emphasis). The main flow becomes a dead-straight column and the back-edges fan to the side as dashed faded curves.
 
 <table>
 <tr><th>graphviz (baseline)</th><th>graphviz (tuned)</th></tr>
 <tr>
-<td><img src="examples/class_shortcuts/job_worker.graphviz.svg" alt="baseline" width="420"></td>
-<td><img src="examples/class_shortcuts/job_worker.tuned.svg" alt="tuned with classes" width="420"></td>
+<td><img src="examples/class_shortcuts/release.graphviz.svg" alt="baseline" width="420"></td>
+<td><img src="examples/class_shortcuts/release.tuned.svg" alt="tuned with classes" width="420"></td>
 </tr>
 </table>
 

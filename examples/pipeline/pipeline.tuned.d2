@@ -1,0 +1,92 @@
+direction: down
+
+title: |md
+  # CI/CD Pipeline with Failure Handling (tuned)
+| {
+  near: top-center
+  shape: text
+  style.font-size: 20
+}
+
+# Pin each err-cluster node to a specific build-stage rank so the failure
+# cluster sits compactly alongside the stages it services. Page Oncall is
+# placed between Notify and Rollback to keep the severity >= 2 edge short
+# instead of letting it curve from the top all the way down. The
+# rollback -> page edge is marked constraint=false so the resulting upward
+# back-edge doesn't drag page back down to rollback's rank.
+vars: {
+  d2-config: {
+    data: {
+      graphviz: |
+        {
+          "cluster_attrs": {
+            "pipeline": {"rank_same_anchor": "none"}
+          },
+          "rank_groups": [
+            ["pipeline.ci.lint",    "pipeline.err.notify"],
+            ["pipeline.ci.build",   "pipeline.err.page"],
+            ["pipeline.ci.publish", "pipeline.err.rollback"]
+          ],
+          "edge_attrs": {
+            "pipeline.err.rollback -> pipeline.err.page": {"constraint": "false"}
+          }
+        }
+      |
+    }
+  }
+}
+
+pipeline: "" {
+  direction: right
+  style.fill: transparent
+  style.stroke: transparent
+
+  ci: Build & Test {
+    direction: down
+    style.fill: "#eef6ff"
+    style.stroke: "#6699cc"
+
+    checkout: Checkout {style.fill: "#ddeeff"}
+    install: Install Deps {style.fill: "#ddeeff"}
+    lint: Lint {style.fill: "#ddeeff"}
+    test: Test {style.fill: "#FFD700"; style.bold: true}
+    build: Build Artifact {style.fill: "#ddeeff"}
+    publish: Publish {style.fill: "#90EE90"; style.bold: true}
+
+    checkout -> install
+    install -> lint
+    lint -> test
+    test -> build
+    build -> publish
+  }
+
+  err: Failure Response {
+    direction: down
+    style.fill: "#fde8e8"
+    style.stroke: "#cc4444"
+
+    notify: Notify Slack {style.fill: "#FFB6C1"}
+    page: Page Oncall {style.fill: "#FFB6C1"}
+    rollback: Rollback Last Release {style.fill: "#FFB6C1"}
+
+    notify -> page: severity >= 2
+    rollback -> page: rollback succeeded
+  }
+}
+
+pipeline.ci.lint -> pipeline.err.notify: lint fail {
+  style.stroke: "#cc4444"
+  style.stroke-dash: 4
+}
+pipeline.ci.test -> pipeline.err.notify: test fail {
+  style.stroke: "#cc4444"
+  style.stroke-dash: 4
+}
+pipeline.ci.build -> pipeline.err.notify: build fail {
+  style.stroke: "#cc4444"
+  style.stroke-dash: 4
+}
+pipeline.ci.publish -> pipeline.err.rollback: publish fail {
+  style.stroke: "#cc4444"
+  style.stroke-dash: 4
+}

@@ -1,44 +1,54 @@
 direction: down
 
-# Tighten the plugin defaults for this single-cluster diagram.
-vars: {
-  d2-config: {
-    data: {
-      graphviz: |
-        {"global_attrs": {"nodesep": "0.6", "ranksep": "0.8"}}
-      |
-    }
+title: Payment Processing State Machine {
+  near: top-center
+  shape: text
+  style.font-size: 22
+  style.bold: true
+}
+
+flow: "" {
+  direction: right
+  style.fill: transparent
+  style.stroke: transparent
+
+  main: Happy Path {
+    direction: down
+    style.fill: "#eef6ff"
+    style.stroke: "#6699cc"
+
+    initiated: INITIATED {style.fill: "#ddeeff"}
+    validating: VALIDATING {style.fill: "#ddeeff"}
+    authorizing: AUTHORIZING {style.fill: "#FFD700"}
+    capturing: CAPTURING {style.fill: "#FFD700"; style.bold: true}
+    settled: SETTLED {style.fill: "#90EE90"; style.bold: true}
+    refunded: REFUNDED {style.fill: "#cccccc"}
+
+    initiated -> validating
+    validating -> authorizing: payload ok
+    authorizing -> capturing: auth ok
+    capturing -> settled: capture ok
+    settled -> refunded: refund initiated
+  }
+
+  exceptions: Exception Handling {
+    direction: down
+    style.fill: "#fde8e8"
+    style.stroke: "#cc4444"
+
+    validation_failed: VALIDATION FAILED {style.fill: "#FFB6C1"}
+    auth_declined: AUTH DECLINED {style.fill: "#FFB6C1"}
+    capture_failed: CAPTURE FAILED {style.fill: "#FFB6C1"}
+    manual_review: MANUAL REVIEW {style.fill: "#ffcccc"; style.bold: true}
+
+    validation_failed -> manual_review
+    auth_declined -> manual_review
+    capture_failed -> manual_review
   }
 }
 
-title: |md
-  # Door Access Controller
-| {
-  near: top-center
-  shape: text
-  style.font-size: 20
-}
-
-start: _ {shape: circle; style.fill: "#333"}
-locked: LOCKED {style.fill: "#ddeeff"}
-auth: AUTHENTICATING {style.fill: "#FFD700"; style.bold: true}
-unlocked: UNLOCKED {style.fill: "#90EE90"; style.bold: true}
-open: OPEN {style.fill: "#d4edda"}
-closed: CLOSED {style.fill: "#ddeeff"}
-denied: AUTH DENIED {style.fill: "#FFB6C1"}
-lockout: LOCKOUT {style.fill: "#FFB6C1"}
-fault: SENSOR FAULT {style.fill: "#FFB6C1"}
-
-start -> locked
-locked -> auth: badge presented
-auth -> unlocked: valid credential
-unlocked -> open: door pulled
-open -> closed: door pushed
-closed -> locked: auto-lock timeout
-auth -> denied: invalid credential
-denied -> locked: retry timeout
-denied -> lockout: 3 failed attempts
-lockout -> locked: admin reset
-open -> fault: sensor lost
-fault -> closed: sensor recovered
-unlocked -> locked: cancel
+flow.main.validating -> flow.exceptions.validation_failed: invalid payload
+flow.main.authorizing -> flow.exceptions.auth_declined: declined
+flow.main.capturing -> flow.exceptions.capture_failed: gateway error
+flow.exceptions.manual_review -> flow.main.initiated: retry approved
+flow.main.refunded -> flow.main.initiated: refund completed
